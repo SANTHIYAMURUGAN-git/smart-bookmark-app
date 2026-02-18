@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 
 type Bookmark = {
@@ -13,62 +13,41 @@ type Bookmark = {
 export default function BookmarkList({ initialBookmarks }: { initialBookmarks: Bookmark[] }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(initialBookmarks)
 
-  const fetchBookmarks = useCallback(async () => {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('bookmarks')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (data) setBookmarks(data)
-  }, [])
-
   useEffect(() => {
     const supabase = createClient()
 
-    // Initial fetch to make sure we have latest data
-    fetchBookmarks()
-
-    // Set up realtime channel
-    const channel = supabase
-      .channel(`realtime-bookmarks-${Math.random()}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'bookmarks',
-        },
-        (payload) => {
-          console.log('INSERT received:', payload)
-          setBookmarks((prev) => {
-            // Avoid duplicates
-            const exists = prev.find((b) => b.id === payload.new.id)
-            if (exists) return prev
-            return [payload.new as Bookmark, ...prev]
-          })
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'bookmarks',
-        },
-        (payload) => {
-          console.log('DELETE received:', payload)
-          setBookmarks((prev) => prev.filter((b) => b.id !== payload.old.id))
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime status:', status)
+    // Fetch latest on mount
+    supabase
+      .from('bookmarks')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setBookmarks(data)
       })
 
+    // Realtime subscription
+    const channel = supabase
+      .channel('bookmarks-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookmarks' },
+        () => {
+          // Re-fetch all bookmarks on any change
+          supabase
+            .from('bookmarks')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .then(({ data }) => {
+              if (data) setBookmarks(data)
+            })
+        }
+      )
+      .subscribe()
+
     return () => {
-      console.log('Cleaning up channel')
       supabase.removeChannel(channel)
     }
-  }, [fetchBookmarks])
+  }, [])
 
   const deleteBookmark = async (id: string) => {
     const supabase = createClient()
@@ -76,7 +55,7 @@ export default function BookmarkList({ initialBookmarks }: { initialBookmarks: B
       .from('bookmarks')
       .delete()
       .eq('id', id)
-    
+
     if (error) {
       console.error('Delete error:', error)
       alert('Error deleting bookmark: ' + error.message)
@@ -126,11 +105,13 @@ export default function BookmarkList({ initialBookmarks }: { initialBookmarks: B
                 {bookmark.url}
               </a>
               <p className="text-xs text-gray-400 mt-1">
-                Added on {new Date(bookmark.created_at).toLocaleDateString('en-GB', {
-  year: 'numeric',
-  month: 'short', 
-  day: 'numeric'
-})}              </p>
+                Added on{' '}
+                {new Date(bookmark.created_at).toLocaleDateString('en-GB', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                })}
+              </p>
             </div>
             <button
               onClick={() => deleteBookmark(bookmark.id)}
