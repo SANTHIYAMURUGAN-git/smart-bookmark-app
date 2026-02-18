@@ -28,12 +28,10 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // Get user
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user)
     })
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
       if (session?.user) fetchBookmarks()
@@ -47,7 +45,6 @@ export default function Home() {
 
     fetchBookmarks()
 
-    // Realtime subscription
     const channel = supabase
       .channel('bookmarks-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'bookmarks' }, () => {
@@ -63,9 +60,7 @@ export default function Home() {
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     })
   }
 
@@ -79,17 +74,32 @@ export default function Home() {
     e.preventDefault()
     if (!title.trim() || !url.trim() || !user) return
     setLoading(true)
-    await supabase.from('bookmarks').insert({
+
+    const newBookmark = {
       title: title.trim(),
       url: url.trim(),
       user_id: user.id,
-    })
+    }
+
+    const { data } = await supabase
+      .from('bookmarks')
+      .insert(newBookmark)
+      .select()
+      .single()
+
+    if (data) {
+      // Immediately update same tab
+      setBookmarks((prev) => [data, ...prev])
+    }
+
     setTitle('')
     setUrl('')
     setLoading(false)
   }
 
   const deleteBookmark = async (id: string) => {
+    // Immediately update same tab
+    setBookmarks((prev) => prev.filter((b) => b.id !== id))
     await supabase.from('bookmarks').delete().eq('id', id)
   }
 
@@ -124,10 +134,7 @@ export default function Home() {
             <h1 className="text-3xl font-bold text-gray-900">Smart Bookmarks</h1>
             <p className="text-gray-600 mt-1">Welcome, {user.email}</p>
           </div>
-          <button
-            onClick={signOut}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors font-medium"
-          >
+          <button onClick={signOut} className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors font-medium">
             Sign Out
           </button>
         </div>
