@@ -13,17 +13,20 @@ type Bookmark = {
 export default function BookmarkList({ initialBookmarks }: { initialBookmarks: Bookmark[] }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(initialBookmarks)
 
-  useEffect(() => {
+  const fetchBookmarks = async () => {
     const supabase = createClient()
-
-    // Fetch latest on mount
-    supabase
+    const { data } = await supabase
       .from('bookmarks')
       .select('*')
       .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (data) setBookmarks(data)
-      })
+    if (data) setBookmarks(data)
+  }
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    // Fetch on mount
+    fetchBookmarks()
 
     // Realtime subscription
     const channel = supabase
@@ -32,20 +35,21 @@ export default function BookmarkList({ initialBookmarks }: { initialBookmarks: B
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bookmarks' },
         () => {
-          // Re-fetch all bookmarks on any change
-          supabase
-            .from('bookmarks')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .then(({ data }) => {
-              if (data) setBookmarks(data)
-            })
+          fetchBookmarks()
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log('Realtime status:', status)
+      })
+
+    // Polling every 2 seconds as fallback (guarantees updates even if realtime fails)
+    const interval = setInterval(() => {
+      fetchBookmarks()
+    }, 2000)
 
     return () => {
       supabase.removeChannel(channel)
+      clearInterval(interval)
     }
   }, [])
 
@@ -59,6 +63,9 @@ export default function BookmarkList({ initialBookmarks }: { initialBookmarks: B
     if (error) {
       console.error('Delete error:', error)
       alert('Error deleting bookmark: ' + error.message)
+    } else {
+      // Immediately remove from UI
+      setBookmarks((prev) => prev.filter((b) => b.id !== id))
     }
   }
 
